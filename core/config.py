@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import zoneinfo
 from collections.abc import Mapping, MutableMapping
+from pathlib import Path
 from types import MappingProxyType, UnionType
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
@@ -188,6 +188,7 @@ class ParserConfig(ConfigNodeContainer):
 class PluginConfig(ConfigNode):
     whitelist: list[str]
     blacklist: list[str]
+    napcat_platform: str
 
     arbiter: bool
     debounce_interval: int
@@ -269,4 +270,3 @@ class PluginConfig(ConfigNode):
         if umo in self.blacklist:
             self.blacklist.remove(umo)
             self.save_config()
-
