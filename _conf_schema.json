@@ -1,4 +1,14 @@
 {
+    "napcat_platform": {
+        "description": "Napcat 运行平台",
+        "hint": "选择 Napcat 所在的系统：windows（主机运行） 或 wsl2（WSL2 内运行）",
+        "type": "string",
+        "options": [
+            "windows",
+            "wsl2"
+        ],
+        "default": "windows"
+    },
     "whitelist": {
         "description": "解析白名单",
         "hint": "请填写会话ID (可用命令sid查看), 一旦添加了白名单，则只有白名单会话发的链接会触发解析，优先级比黑名单高。留空表示不限制",
