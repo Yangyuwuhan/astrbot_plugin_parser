@@ -1,3 +1,4 @@
+import os
 from itertools import chain
 from pathlib import Path
 
@@ -51,6 +52,25 @@ class MessageSender:
         self.cfg = config
         self.renderer = renderer
 
+    def _get_windows_path(self, path: Path) -> str:
+        """返回 Windows 可访问的路径（正斜杠形式）"""
+        return path.as_posix()
+
+    def _get_wsl2_path(self, path: Path) -> str:
+        """
+        将 Windows 路径转换为 WSL2 可访问的路径字符串。
+        例如：F:\\AstrBotLauncher\\... → /mnt/f/AstrBotLauncher/...
+        """
+        path_str = str(path)
+        drive, tail = os.path.splitdrive(path_str)
+        if drive:
+            drive_letter = drive[0].lower()
+            tail = tail.lstrip("\\").replace("\\", "/")
+            return f"/mnt/{drive_letter}/{tail}"
+        else:
+            # 没有盘符的情况（如网络路径），直接转换斜杠
+            return path_str.replace("\\", "/")
+
     def _build_send_plan(self, result: ParseResult) -> dict:
         """
         根据解析结果生成发送计划（plan）
@@ -90,7 +110,6 @@ class MessageSender:
             "force_merge": force_merge,
         }
 
-
     async def _send_preview_card(
         self,
         event: AstrMessageEvent,
@@ -109,8 +128,9 @@ class MessageSender:
             return
 
         if image_path := await self.renderer.render_card(result):
-            await event.send(event.chain_result([Image(str(image_path))]))
-
+            # 预览卡片是图片，使用 Windows 路径（AstrBot 会将其转为 base64 发送）
+            path_str = self._get_windows_path(image_path)
+            await event.send(event.chain_result([Image(path_str)]))
 
     async def _build_segments(
         self,
@@ -129,7 +149,9 @@ class MessageSender:
         # 合并转发时，卡片以内联形式作为一个消息段参与合并
         if plan["render_card"] and plan["force_merge"]:
             if image_path := await self.renderer.render_card(result):
-                segs.append(Image(str(image_path)))
+                # 卡片图片使用 Windows 路径
+                path_str = self._get_windows_path(image_path)
+                segs.append(Image(path_str))
 
         # 轻媒体处理
         for cont in plan["light"]:
@@ -144,10 +166,14 @@ class MessageSender:
 
             match cont:
                 case ImageContent():
-                    segs.append(Image(str(path)))
+                    # 图片：使用 Windows 路径，让 AstrBot 转为 base64
+                    path_str = self._get_windows_path(path)
+                    segs.append(Image(path_str))
                 case GraphicsContent() as g:
-                    segs.append(Image(str(path)))
-                    # GraphicsContent 允许携带补充文本
+                    # GraphicsContent 本质也是图片，使用 Windows 路径
+                    path_str = self._get_windows_path(path)
+                    segs.append(Image(path_str))
+                    # 携带补充文本
                     if g.text:
                         segs.append(Plain(g.text))
                     if g.alt:
@@ -167,18 +193,31 @@ class MessageSender:
 
             match cont:
                 case VideoContent() | DynamicContent():
-                    segs.append(Video(str(path)))
+                    # 视频：需要 Napcat 直接读取文件，因此使用 WSL2 路径（如果配置）
+                    if self.cfg.napcat_platform == "wsl2":
+                        path_str = self._get_wsl2_path(path)
+                    else:
+                        path_str = self._get_windows_path(path)
+                    segs.append(Video(path_str))
                 case AudioContent():
-                    segs.append(
-                        File(name=path.name, file=str(path))
-                        if self.cfg.audio_to_file
-                        else Record(str(path))
-                    )
+                    # 音频：根据配置决定以文件还是语音形式发送
+                    if self.cfg.napcat_platform == "wsl2":
+                        path_str = self._get_wsl2_path(path)
+                    else:
+                        path_str = self._get_windows_path(path)
+                    if self.cfg.audio_to_file:
+                        segs.append(File(name=path.name, file=path_str))
+                    else:
+                        segs.append(Record(path_str))
                 case FileContent():
-                    segs.append(File(name=path.name, file=str(path)))
+                    # 文件：使用 WSL2 路径（如果配置）
+                    if self.cfg.napcat_platform == "wsl2":
+                        path_str = self._get_wsl2_path(path)
+                    else:
+                        path_str = self._get_windows_path(path)
+                    segs.append(File(name=path.name, file=path_str))
 
         return segs
-
 
     def _merge_segments_if_needed(
         self,
@@ -200,10 +239,9 @@ class MessageSender:
         self_id = event.get_self_id()
 
         for seg in segs:
-            nodes.nodes.append(Node(uin=self_id, name="解析器", content=[seg]))
+            nodes.nodes.append(Node(uin=self_id, name="有曦-解析", content=[seg]))
 
         return [nodes]
-
 
     async def send_parse_result(
         self,
